@@ -1,3 +1,4 @@
+# Libraries can be installed from CRAN, with the exception of INLA (please refer to https://www.r-inla.org/download-install)
 library(INLA)
 library(sp)
 library(SpatialEpi)
