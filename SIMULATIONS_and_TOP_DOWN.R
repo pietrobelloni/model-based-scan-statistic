@@ -14,7 +14,6 @@ library(DClusterm)
 # In particular, each row is a specific area of the map, and, 
 # for each area, there are the variable "Denominator" (in our study, the expected cases of death) and "Pop" for the population.
 
-setwd("C:/Users/enric/OneDrive/Desktop/Lavoro/ArticoloSubmission/0CODICE")
 load("PaduaMap_and_AdjMatrix.Rdata")
 map <- PaduaMap
 
