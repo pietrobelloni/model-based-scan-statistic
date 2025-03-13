@@ -142,9 +142,16 @@ top_down <- function(map, adjMatr, covariates=NULL, fracPop=1, minAreas=3){
   # fracPop is the maximum fraction of population to include in the cluster
   # minAreas is the number of minimum contiguous areas to define a cluster 
   
+  sensspec <- matrix(NA, 12, 3)
+  sensspec[,2]<-rep(c("TP","FP","TN","FN","Sens","Spec"),2)
+  sensspec[,3]<-c(rep("Top-down",6),rep("Bottom-up",6))
+  sensspec <- as.data.frame(sensspec)
+  colnames(sensspec)<-c("Value","Criteria","Method")
+  
   # BYM2
   g <- inla.read.graph(adjMatr)
   map$re_u <- 1:nrow(map@data)
+  start <- Sys.time()
   prior.try <- list(prec = list(prior = "pc.prec", param = c(0.5 / 0.31, 0.01)),
                     phi = list(prior = "pc", param = c(0.5, 2 / 3)))
   if(is.null(covariates)==T){
@@ -180,50 +187,13 @@ top_down <- function(map, adjMatr, covariates=NULL, fracPop=1, minAreas=3){
     model0 <- glm(as.formula(paste0("NumSim ~ offset(log(Denominator)) + 1 +", covar)), family = "poisson", data = map)
   }
   
-  sensspec <- matrix(NA, 12, 3)
-  sensspec[,2]<-rep(c("TP","FP","TN","FN","Sens","Spec"),2)
-  sensspec[,3]<-c(rep("Top-down",6),rep("Bottom-up",6))
-  sensspec <- as.data.frame(sensspec)
-  colnames(sensspec)<-c("Value","Criteria","Method")
-  
   # TOP-DOWN APPROACH 
   centr <- map@data[which(map$excess!=0),]$Area; centroids <- coordinates(map)[centr,]
-  gc()
-  start <- Sys.time()
-  DCl_td <- DetectClustersModel(map, thegrid=centroids, fractpop=fracPop, alpha = 0.05, typeCluster = "S", R = NULL, model0 = model0, ClusterSizeContribution = "Pop")
-  time <- difftime(Sys.time(), start, units=c("secs"))
-  time_td <- as.numeric(time[1])
-  if(is.data.frame(DCl_td)==T){
-    clusterFin_td <- slimknclusters(map, DCl_td, minsize=minAreas)
-    clusterFin_td <- clusterFin_td[clusterFin_td$pvalue < 0.05/seq(nrow(map@data),nrow(map@data)-nrow(clusterFin_td)+1),]
-    elements_td <- get.stclusters(map, clusterFin_td)
-    map$cluster <- 0
-    for(i in 1:nrow(clusterFin_td)){ map$cluster[elements_td[[i]]] <- paste("cluster",i,sep="") }
-    map$num <- rep(0, nrow(map@data))
-    for(i in 1:nrow(map@data)){
-      for(j in 1:nrow(clusterFin_td)){ if(map$cluster[i]==paste0("cluster",j)) map$num[i] = j }
-    }
-    ic_td <- matrix(NA, nrow(clusterFin_td), 4); ic_td <- as.data.frame(ic_td)
-    colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
-    ic_td[,4] <- rep("Top-down", nrow(clusterFin_td))
-    m2 <- glm(NumSim ~ offset(log(Denominator)) + 1, family = "poisson", data = map)
-    c2 <- rep(NA, nrow(map@data))
-    for(i in 1:nrow(ic_td)){
-      c2 <- ifelse(map$cluster==paste0("cluster",i),1,0)
-      m3 <- glm(NumSim ~ -1+c2, offset=log(fitted(m2)), family = "poisson", data = map)
-      ic_td[i,1:3] <- round(c(exp(summary(m3)$coefficients[1]),
-                              exp(summary(m3)$coefficients[1]+c(-1,1)*qnorm(0.975)*summary(m3)$coefficients[2])),3)
-    }
-    rand_td <- fossil::rand.index(map$z, map$num)
-    num2 <- rep(NA, nrow(map@data)); num2 <- ifelse(map$num==0,0,1)
-    tab <- table(num2, map$z)
-    if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
-    sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
-    sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
-  } else{
+  if(length(centr)==0) {
+    print("There are no areas of significant excess using bym2, so there are no clusters according to the top-down approach.")
     map$cluster <- rep(0, nrow(map@data))
     map$num <- rep(0, nrow(map@data))
-    ic_td <- matrix(NA, 1, 3); ic_td <- as.data.frame(ic_td)
+    ic_td <- matrix(NA, 1, 4); ic_td <- as.data.frame(ic_td)
     colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
     ic_td[,4] <- rep("Top-down", 1)
     rand_td <- fossil::rand.index(map$z, map$num)
@@ -231,9 +201,122 @@ top_down <- function(map, adjMatr, covariates=NULL, fracPop=1, minAreas=3){
     if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
     sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
     sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+    time <- difftime(Sys.time(), start, units=c("secs"))
+    time_td <- as.numeric(time[1])
+  } else if(length(centr)>0) {
+    gc()
+    if(length(centr)==1) {centroids <- matrix(centroids,1,2)
+    } else if(length(centr)>1) {centroids <- as.matrix(centroids)}
+    DCl_td <- DetectClustersModel(map, thegrid=centroids, fractpop=fracPop, alpha = 0.05, typeCluster = "S", R = NULL, model0 = model0, ClusterSizeContribution = "Pop")
+    time <- difftime(Sys.time(), start, units=c("secs"))
+    time_td <- as.numeric(time[1])
+    if(is.data.frame(DCl_td)==T){
+      if(length(DCl_td$size)==1){
+        if(DCl_td$size<minAreas){
+          map$cluster <- rep(0, nrow(map@data))
+          map$num <- rep(0, nrow(map@data))
+          ic_td <- matrix(NA, 1, 4); ic_td <- as.data.frame(ic_td)
+          colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+          ic_td[,4] <- rep("Top-down", 1)
+          rand_td <- fossil::rand.index(map$z, map$num)
+          tab <- table(map$num, map$z)
+          if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+          sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+          sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+        } else if(DCl_td$size>=minAreas){
+          clusterFin_td <- slimknclusters(map, DCl_td, minsize=minAreas)
+          clusterFin_td <- clusterFin_td[clusterFin_td$pvalue < 0.05/seq(length(centr),length(centr)-nrow(clusterFin_td)+1),]
+          elements_td <- get.stclusters(map, clusterFin_td)
+          map$cluster <- 0
+          for(i in 1:nrow(clusterFin_td)){ map$cluster[elements_td[[i]]] <- paste("cluster",i,sep="") }
+          map$num <- rep(0, nrow(map@data))
+          for(i in 1:nrow(map@data)){
+            for(j in 1:nrow(clusterFin_td)){ if(map$cluster[i]==paste0("cluster",j)) map$num[i] = j }
+          }
+          ic_td <- matrix(NA, nrow(clusterFin_td), 4); ic_td <- as.data.frame(ic_td)
+          colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+          ic_td[,4] <- rep("Top-down", nrow(clusterFin_td))
+          m2 <- glm(NumSim ~ offset(log(Denominator)) + 1, family = "poisson", data = map)
+          c2 <- rep(NA, nrow(map@data))
+          for(i in 1:nrow(ic_td)){
+            c2 <- ifelse(map$cluster==paste0("cluster",i),1,0)
+            m3 <- glm(NumSim ~ -1+c2, offset=log(fitted(m2)), family = "poisson", data = map)
+            ic_td[i,1:3] <- round(c(exp(summary(m3)$coefficients[1]),
+                                    exp(summary(m3)$coefficients[1]+c(-1,1)*qnorm(0.975)*summary(m3)$coefficients[2])),3)
+          }
+          rand_td <- fossil::rand.index(map$z, map$num)
+          num2 <- rep(NA, nrow(map@data)); num2 <- ifelse(map$num==0,0,1)
+          tab <- table(num2, map$z)
+          if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+          sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+          sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+        } else{
+          map$cluster <- rep(0, nrow(map@data))
+          map$num <- rep(0, nrow(map@data))
+          ic_td <- matrix(NA, 1, 4); ic_td <- as.data.frame(ic_td)
+          colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+          ic_td[,4] <- rep("Top-down", 1)
+          rand_td <- fossil::rand.index(map$z, map$num)
+          tab <- table(map$num, map$z)
+          if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+          sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+          sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+        }
+      } else if(length(DCl_td$size)>1) {
+        clSizes <- DCl_td$size
+        if(sum(clSizes) < minAreas*nrow(DCl_td)){
+          map$cluster <- rep(0, nrow(map@data))
+          map$num <- rep(0, nrow(map@data))
+          ic_td <- matrix(NA, 1, 4); ic_td <- as.data.frame(ic_td)
+          colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+          ic_td[,4] <- rep("Top-down", 1)
+          rand_td <- fossil::rand.index(map$z, map$num)
+          tab <- table(map$num, map$z)
+          if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+          sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+          sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+        } else if(sum(clSizes) >= minAreas*nrow(DCl_td)){
+          clusterFin_td <- slimknclusters(map, DCl_td, minsize=minAreas)
+          clusterFin_td <- clusterFin_td[clusterFin_td$pvalue < 0.05/seq(length(centr),length(centr)-nrow(clusterFin_td)+1),]
+          elements_td <- get.stclusters(map, clusterFin_td)
+          map$cluster <- 0
+          for(i in 1:nrow(clusterFin_td)){ map$cluster[elements_td[[i]]] <- paste("cluster",i,sep="") }
+          map$num <- rep(0, nrow(map@data))
+          for(i in 1:nrow(map@data)){
+            for(j in 1:nrow(clusterFin_td)){ if(map$cluster[i]==paste0("cluster",j)) map$num[i] = j }
+          }
+          ic_td <- matrix(NA, nrow(clusterFin_td), 4); ic_td <- as.data.frame(ic_td)
+          colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+          ic_td[,4] <- rep("Top-down", nrow(clusterFin_td))
+          m2 <- glm(NumSim ~ offset(log(Denominator)) + 1, family = "poisson", data = map)
+          c2 <- rep(NA, nrow(map@data))
+          for(i in 1:nrow(ic_td)){
+            c2 <- ifelse(map$cluster==paste0("cluster",i),1,0)
+            m3 <- glm(NumSim ~ -1+c2, offset=log(fitted(m2)), family = "poisson", data = map)
+            ic_td[i,1:3] <- round(c(exp(summary(m3)$coefficients[1]),
+                                    exp(summary(m3)$coefficients[1]+c(-1,1)*qnorm(0.975)*summary(m3)$coefficients[2])),3)
+          }
+          rand_td <- fossil::rand.index(map$z, map$num)
+          num2 <- rep(NA, nrow(map@data)); num2 <- ifelse(map$num==0,0,1)
+          tab <- table(num2, map$z)
+          if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+          sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+          sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+        }}
+    } else{
+      map$cluster <- rep(0, nrow(map@data))
+      map$num <- rep(0, nrow(map@data))
+      ic_td <- matrix(NA, 1, 4); ic_td <- as.data.frame(ic_td)
+      colnames(ic_td) <- c("Risk","Lower_0.025","Upper_0.975","Method")
+      ic_td[,4] <- rep("Top-down", 1)
+      rand_td <- fossil::rand.index(map$z, map$num)
+      tab <- table(map$num, map$z)
+      if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
+      sensspec[1,1] <- tab[2,2]; sensspec[2,1] <- tab[2,1]; sensspec[3,1] <- tab[1,1]; sensspec[4,1] <- tab[1,2];
+      sensspec[5,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[6,1] <- round(tab[1,1]/sum(tab[,1]),3)
+    }
   }
-  
-  # BOTTOM-UP APPORACH
+  # BOTTOM-UP APPROACH
   centroids_bu <- matrix(NA, nrow(map@data), 2)
   for(i in 1:nrow(map@data)) centroids_bu[i,] <- map@polygons[[i]]@labpt
   gc()
@@ -263,7 +346,7 @@ top_down <- function(map, adjMatr, covariates=NULL, fracPop=1, minAreas=3){
                               exp(summary(m3)$coefficients[1]+c(-1,1)*qnorm(0.975)*summary(m3)$coefficients[2])),3)
     }
     rand_bu <- fossil::rand.index(map$z, map$num_bu)
-    num2_bu <- rep(NA, nrow(map@data)); num2_bu <- ifelse(map$num==0,0,1)
+    num2_bu <- rep(NA, nrow(map@data)); num2_bu <- ifelse(map$num_bu==0,0,1)
     tab <- table(num2_bu, map$z)
     if(nrow(tab)==1){ tab <- rbind(tab,c(0,0)) }
     sensspec[7,1] <- tab[2,2]; sensspec[8,1] <- tab[2,1]; sensspec[9,1] <- tab[1,1]; sensspec[10,1] <- tab[1,2]; 
@@ -280,10 +363,10 @@ top_down <- function(map, adjMatr, covariates=NULL, fracPop=1, minAreas=3){
     sensspec[7,1] <- tab[2,2]; sensspec[8,1] <- tab[2,1]; sensspec[9,1] <- tab[1,1]; sensspec[10,1] <- tab[1,2]; 
     sensspec[11,1] <- round(tab[2,2]/sum(tab[,2]),3); sensspec[12,1] <- round(tab[1,1]/sum(tab[,1]),3)
   }
-
+  
   clusterTime <- as.data.frame(matrix(c(round(time_td,3),round(time_bu,3),"Top-down","Bottom-up"),2,2)); colnames(clusterTime) <- c("Time", "Method")
   clusterRisk <- rbind(ic_td, ic_bu)
-  clusterRand <- as.data.frame(matrix(c(round(rand_td,3),round(rand_bu,3),"Top-down","Bottom-up"),2,2)); colnames(clusterRand) <- c("Rand Index", "Method")
+  clusterRand <- as.data.frame(matrix(c(round(rand_td,3),round(rand_bu,3),"Top-down","Bottom-up"),2,2)); colnames(clusterRand) <- c("Rand_Index", "Method")
   
   # the output is a list with the time of the procedures, the risks of the clusters and the performance ability through 
   # the Rand index, sensitivity and specificity 
