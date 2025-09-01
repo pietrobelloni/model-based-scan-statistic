@@ -6,6 +6,7 @@ library(ggplot2)
 library(patchwork)
 library(DClusterm)
 
+#
 # load the map of Padua province with the mortality information about deaths for major causes in males population
 # Since the data cannot be shared because of privacy, we simulated the denominator for the risk using the same distribution of the 
 # true expected cases of deaths used in our study, adjusted for the population of the municipalities and multiplied by 1000. 
